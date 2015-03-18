@@ -1,0 +1,6 @@
+customer: test
+username: test
+password: test123
+# TTL in seconds
+minTTL: 300
+verbose: false
