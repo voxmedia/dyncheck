@@ -43,6 +43,18 @@ func newStatus() *Status {
 	return &Status{Data: make(map[string]int)}
 }
 
+func printResults(text string) {
+	fmt.Println(text)
+}
+
+func slackResults(text string, conf Config) (err error) {
+	api := slack.New(conf.SlackToken)
+	params := slack.PostMessageParameters{}
+	a, b, err := api.PostMessage(conf.SlackChannelID, text, params)
+	fmt.Printf("%v %v %v", a, b, err)
+	return
+}
+
 func main() {
 
 	if len(os.Args) != 3 {
@@ -155,16 +167,4 @@ func main() {
 			check(err)
 		}
 	}
-}
-
-func printResults(text string) {
-	fmt.Println(text)
-}
-
-func slackResults(text string, conf Config) (err error) {
-	api := slack.New(conf.SlackToken)
-	params := slack.PostMessageParameters{}
-	a, b, err := api.PostMessage(conf.SlackChannelID, text, params)
-	fmt.Printf("%v %v %v", a, b, err)
-	return
 }
