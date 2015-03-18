@@ -59,16 +59,12 @@ func main() {
 	statusToSave := newStatus()
 
 	savedStatus, err := ioutil.ReadFile(statusFile)
-	mustCheck(err)
+	if err != nil {
+		fmt.Println("No status file found, a new one will be created.")
+		savedStatus = []byte("data: {}")
+	}
 	err = yaml.Unmarshal(savedStatus, &status)
 	mustCheck(err)
-
-	// status := newStatus()
-	// status.Data["test"] = 10
-	// toWrite, err := yaml.Marshal(status)
-	// mustCheck(err)
-	// err = ioutil.WriteFile("status.yaml", toWrite, os.FileMode(int(0755)))
-	// mustCheck(err)
 
 	client := dynect.NewClient(conf.Customer)
 	client.Verbose(conf.Verbose)
