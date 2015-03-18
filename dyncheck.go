@@ -3,18 +3,24 @@ package main
 import (
 	"fmt"
 	"github.com/nesv/go-dynect/dynect"
+	"github.com/nlopes/slack"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"os"
+	"regexp"
 	"strings"
 )
 
 type Config struct {
-	Customer string
-	Username string
-	Password string
-	MinTTL   int `yaml:"minTTL"`
-	Verbose  bool
+	Customer       string
+	Username       string
+	Password       string
+	MinTTL         int `yaml:"minTTL"`
+	Verbose        bool
+	PrintResults   bool   `yaml:"print_results"`
+	SlackResults   bool   `yaml:"slack_results"`
+	SlackToken     string `yaml:"slack_token"`
+	SlackChannelID string `yaml:"slack_channel_id"`
 }
 
 type Status struct {
@@ -75,12 +81,10 @@ func main() {
 	err = client.Do("GET", "Zone", nil, &zones)
 	mustCheck(err)
 
-	for i, zone := range zones.Data {
+	// this will be used down there but we compile it here to avoid compiling the RE every loop
+	re := regexp.MustCompile(`216\.146\..*`)
 
-		fmt.Println(i)
-		if i > 5 {
-			break
-		}
+	for _, zone := range zones.Data {
 
 		// zones returns a full path lile /REST/zone/<zone name> so we trim it
 		uri := strings.TrimPrefix(zone, "/REST/Zone/")
@@ -100,6 +104,7 @@ func main() {
 		}
 		statusToSave.Data[zoneData.Data.Zone] = zoneData.Data.Serial
 
+		// get all records and check the TTL on each one
 		var records dynect.AllRecordsResponse
 		err = client.Do("GET", "AllRecord/"+uri, nil, &records)
 		check(err)
@@ -110,6 +115,12 @@ func main() {
 			var node dynect.RecordResponse
 			err = client.Do("GET", recData, nil, &node)
 			check(err)
+
+			// match the A record address with known dynect IPs
+			// this is a hacky way to check if a record is a HTTP Redirect service and must be ignored
+			if re.MatchString(node.Data.RData.Address) {
+				continue
+			}
 
 			if node.Data.TTL < conf.MinTTL {
 				offendingNodes = append(offendingNodes, node)
@@ -127,11 +138,33 @@ func main() {
 	err = os.Rename(tempFile.Name(), statusFile)
 	mustCheck(err)
 
-	// print the results
+	// decide what to do with results
 	if len(offendingNodes) > 0 {
-		fmt.Printf("Those nodes have TTLs lower than %d\n", conf.MinTTL)
+		var textSlice []string
+		textSlice = append(textSlice, fmt.Sprintf("Those nodes have TTLs lower than %d", conf.MinTTL))
 		for _, n := range offendingNodes {
-			fmt.Printf("%s\n", n.Data.FQDN)
+			textSlice = append(textSlice, fmt.Sprintf("%s", n.Data.FQDN))
+		}
+		text := strings.Join(textSlice, "\n")
+
+		switch {
+		case conf.PrintResults == true:
+			printResults(text)
+		case conf.SlackResults == true:
+			err = slackResults(text, conf)
+			check(err)
 		}
 	}
+}
+
+func printResults(text string) {
+	fmt.Println(text)
+}
+
+func slackResults(text string, conf Config) (err error) {
+	api := slack.New(conf.SlackToken)
+	params := slack.PostMessageParameters{}
+	a, b, err := api.PostMessage(conf.SlackChannelID, text, params)
+	fmt.Printf("%v %v %v", a, b, err)
+	return
 }

@@ -4,3 +4,7 @@ password: test123
 # TTL in seconds
 minTTL: 300
 verbose: false
+print_results: true
+slack_results: false
+slack_token: xxxx-xxxx-xxxxxxxxxxxxxx
+slack_channel_id: "#channel"
