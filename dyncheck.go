@@ -81,12 +81,10 @@ func main() {
 	mustCheck(err)
 	err = tmpl.Execute(parsedConfig, t)
 	mustCheck(err)
-	fmt.Printf("%v", parsedConfig.String())
 
 	var conf Config
 	err = yaml.Unmarshal(parsedConfig.Bytes(), &conf)
 	mustCheck(err)
-	fmt.Printf("%v", conf)
 
 	status := newStatus()
 	statusToSave := newStatus()
