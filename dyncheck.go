@@ -6,6 +6,7 @@ import (
 	"github.com/nlopes/slack"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
+	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -29,13 +30,13 @@ type Status struct {
 
 func check(err error) {
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		log.Println(err)
 	}
 }
 
 func mustCheck(err error) {
 	if err != nil {
-		panic(err)
+		log.Panic(err)
 	}
 }
 
@@ -78,7 +79,7 @@ func main() {
 
 	savedStatus, err := ioutil.ReadFile(statusFile)
 	if err != nil {
-		fmt.Println("No status file found, a new one will be created.")
+		log.Println("No status file found, a new one will be created.")
 		savedStatus = []byte("data: {}")
 	}
 	err = yaml.Unmarshal(savedStatus, &status)
@@ -90,12 +91,24 @@ func main() {
 	mustCheck(err)
 
 	var zones dynect.ZonesResponse
-	err = client.Do("GET", "Zone", nil, &zones)
-	mustCheck(err)
+	for i := 0; i < 5; i++ {
+		err = client.Do("GET", "Zone", nil, &zones)
+		if err == nil {
+			log.Printf("Got Zone list")
+			break
+		}
+		log.Printf("Retrying Zone GET.. %s/5", i+1)
+		if i == 4 {
+			log.Println("Failed to get zones:")
+			log.Panic(err)
+		}
+	}
 
 	// this will be used down there but we compile it here to avoid compiling the RE every loop
 	re := regexp.MustCompile(`216\.146\..*`)
 
+	counter := 0.0
+	total := len(zones.Data)
 	for _, zone := range zones.Data {
 
 		// zones returns a full path lile /REST/zone/<zone name> so we trim it
@@ -106,21 +119,23 @@ func main() {
 		err = client.Do("GET", "Zone/"+uri, nil, &zoneData)
 		check(err)
 
+		log.Printf("%6.2f%% done", (counter/float64(total))*100.0)
+
 		serial, present := status.Data[zoneData.Data.Zone]
 		if present && serial == zoneData.Data.Serial {
 			if conf.Verbose {
-				fmt.Println("Skipping")
+				log.Printf("Skipping %s", zoneData.Data.Zone)
 			}
 			statusToSave.Data[zoneData.Data.Zone] = serial
 			continue
 		}
-		statusToSave.Data[zoneData.Data.Zone] = zoneData.Data.Serial
 
 		// get all records and check the TTL on each one
 		var records dynect.AllRecordsResponse
 		err = client.Do("GET", "AllRecord/"+uri, nil, &records)
 		check(err)
 
+		failed := 0
 		for _, record := range records.Data {
 			recData := strings.TrimPrefix(record, "/REST/")
 
@@ -136,11 +151,17 @@ func main() {
 
 			if node.Data.TTL < conf.MinTTL {
 				offendingNodes = append(offendingNodes, node)
+				failed++
 			}
 		}
+		if failed == 0 {
+			statusToSave.Data[zoneData.Data.Zone] = zoneData.Data.Serial
+		}
+		counter++
 	}
 
 	// now we save the new status using a tempfile
+	log.Print("Saving status file...")
 	tempFile, err := ioutil.TempFile(os.TempDir(), "dyncheck")
 	mustCheck(err)
 	toWrite, err := yaml.Marshal(statusToSave)
@@ -149,6 +170,7 @@ func main() {
 	mustCheck(err)
 	err = os.Rename(tempFile.Name(), statusFile)
 	mustCheck(err)
+	log.Println("done")
 
 	// decide what to do with results
 	if len(offendingNodes) > 0 {
