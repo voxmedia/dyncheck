@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/nesv/go-dynect/dynect"
 	"github.com/nlopes/slack"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"text/template"
 )
 
 type Config struct {
@@ -26,6 +28,10 @@ type Config struct {
 
 type Status struct {
 	Data map[string]int
+}
+
+type tmplData struct {
+	SlackToken string
 }
 
 func check(err error) {
@@ -68,11 +74,19 @@ func main() {
 
 	var offendingNodes []dynect.RecordResponse
 
-	data, err := ioutil.ReadFile(configFile)
+	var t tmplData
+	parsedConfig := new(bytes.Buffer)
+	t.SlackToken = os.Getenv("OPSBOT_SLACK_TOKEN")
+	tmpl, err := template.ParseFiles(configFile)
 	mustCheck(err)
+	err = tmpl.Execute(parsedConfig, t)
+	mustCheck(err)
+	fmt.Printf("%v", parsedConfig.String())
+
 	var conf Config
-	err = yaml.Unmarshal(data, &conf)
+	err = yaml.Unmarshal(parsedConfig.Bytes(), &conf)
 	mustCheck(err)
+	fmt.Printf("%v", conf)
 
 	status := newStatus()
 	statusToSave := newStatus()

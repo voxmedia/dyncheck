@@ -6,5 +6,7 @@ minTTL: 300
 verbose: false
 print_results: true
 slack_results: false
-slack_token: xxxx-xxxx-xxxxxxxxxxxxxx
+# you can use {{ .SlackToken }} in place of a string. That will be replaced by the OPSBOT_SLACK_TOKEN environment variable
+# slack_token: {{ .SlackToken }}
+slack_token: xxxx-xxxx-xxxxxxxxxxxxxx 
 slack_channel_id: "#channel"
