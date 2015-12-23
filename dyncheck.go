@@ -83,6 +83,7 @@ func main() {
 	mustCheck(err)
 
 	var conf Config
+
 	err = yaml.Unmarshal(parsedConfig.Bytes(), &conf)
 	mustCheck(err)
 
@@ -90,10 +91,12 @@ func main() {
 	statusToSave := newStatus()
 
 	savedStatus, err := ioutil.ReadFile(statusFile)
+
 	if err != nil {
 		log.Println("No status file found, a new one will be created.")
 		savedStatus = []byte("data: {}")
 	}
+
 	err = yaml.Unmarshal(savedStatus, &status)
 	mustCheck(err)
 
@@ -103,6 +106,7 @@ func main() {
 	mustCheck(err)
 
 	var zones dynect.ZonesResponse
+
 	for i := 0; i < 5; i++ {
 		err = client.Do("GET", "Zone", nil, &zones)
 		if err == nil {
@@ -117,10 +121,13 @@ func main() {
 	}
 
 	// this will be used down there but we compile it here to avoid compiling the RE every loop
-	re := regexp.MustCompile(`216\.146\..*`)
+	redirect := regexp.MustCompile(`216\.146\..*`)
+	cname := regexp.MustCompile(`CNAME`)
+	arecord := regexp.MustCompile(`ARecord`)
 
 	counter := 0.0
 	total := len(zones.Data)
+
 	for _, zone := range zones.Data {
 
 		// zones returns a full path lile /REST/zone/<zone name> so we trim it
@@ -152,23 +159,33 @@ func main() {
 			recData := strings.TrimPrefix(record, "/REST/")
 
 			var node dynect.RecordResponse
-			err = client.Do("GET", recData, nil, &node)
-			check(err)
 
-			// match the A record address with known dynect IPs
-			// this is a hacky way to check if a record is a HTTP Redirect service and must be ignored
-			if re.MatchString(node.Data.RData.Address) {
-				continue
-			}
+      // only test A Records and CNAME Records
+			if cname.MatchString(record) || arecord.MatchString(record) {
+        err = client.Do("GET", recData, nil, &node)
+        check(err)
 
-			if node.Data.TTL < conf.MinTTL {
-				offendingNodes = append(offendingNodes, node)
-				failed++
-			}
-		}
-		if failed == 0 {
-			statusToSave.Data[zoneData.Data.Zone] = zoneData.Data.Serial
-		}
+        // match the A record address with known dynect IPs
+        // this is a hacky way to check if a record is a HTTP Redirect service and must be ignored
+        if redirect.MatchString(node.Data.RData.Address) {
+          continue
+        }
+
+        if node.Data.TTL < conf.MinTTL {
+          offendingNodes = append(offendingNodes, node)
+          failed++
+        }
+
+      } else {
+        if conf.Verbose {
+          log.Printf("skipping %s", record)
+        }
+      }
+
+      if failed == 0 {
+        statusToSave.Data[zoneData.Data.Zone] = zoneData.Data.Serial
+      }
+    }
 		counter++
 	}
 
