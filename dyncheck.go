@@ -21,6 +21,7 @@ type Config struct {
 	MinTTL         int `yaml:"minTTL"`
 	Verbose        bool
 	PrintResults   bool   `yaml:"print_results"`
+	PrintZoneResults   bool   `yaml:"print_zone_results"`
 	SlackResults   bool   `yaml:"slack_results"`
 	SlackToken     string `yaml:"slack_token"`
 	SlackChannelID string `yaml:"slack_channel_id"`
@@ -122,8 +123,11 @@ func main() {
 
 	// this will be used down there but we compile it here to avoid compiling the RE every loop
 	redirect := regexp.MustCompile(`216\.146\..*`)
-	cname := regexp.MustCompile(`CNAME`)
-	arecord := regexp.MustCompile(`ARecord`)
+	cname_regex := regexp.MustCompile(`/CNAME`)
+	a_record_regex := regexp.MustCompile(`/ARecord`)
+  zone_extractor_regex := regexp.MustCompile(`([^/]+)/\d+$`)
+  a_records := make(map[string][]string)
+  cname_records := make(map[string][]string)
 
 	counter := 0.0
 	total := len(zones.Data)
@@ -138,16 +142,18 @@ func main() {
 		err = client.Do("GET", "Zone/"+uri, nil, &zoneData)
 		check(err)
 
-		log.Printf("%6.2f%% done", (counter/float64(total))*100.0)
+		log.Printf("%s %6.2f%% done", zoneData.Data.Zone, (counter/float64(total))*100.0)
 
 		serial, present := status.Data[zoneData.Data.Zone]
+
 		if present && serial == zoneData.Data.Serial {
 			if conf.Verbose {
 				log.Printf("Skipping %s", zoneData.Data.Zone)
 			}
 			statusToSave.Data[zoneData.Data.Zone] = serial
-			continue
+			//continue
 		}
+
 
 		// get all records and check the TTL on each one
 		var records dynect.AllRecordsResponse
@@ -161,15 +167,27 @@ func main() {
 			var node dynect.RecordResponse
 
       // only test A Records and CNAME Records
-			if cname.MatchString(record) || arecord.MatchString(record) {
+			if cname_regex.MatchString(record) || a_record_regex.MatchString(record) {
+        //log.Println(record)
         err = client.Do("GET", recData, nil, &node)
         check(err)
-
+        zone_string := zone_extractor_regex.FindStringSubmatch(record)[1]
+        address := node.Data.RData.Address
         // match the A record address with known dynect IPs
         // this is a hacky way to check if a record is a HTTP Redirect service and must be ignored
-        if redirect.MatchString(node.Data.RData.Address) {
+        if redirect.MatchString(address) {
           continue
         }
+
+        if cname_regex.MatchString(record) {
+          cname_address := node.Data.RData.CName
+          cname_records[cname_address] = append(cname_records[cname_address],zone_string)
+          //log.Println(fmt.Sprintf("CNAME: %s",cname_address))
+        } else if a_record_regex.MatchString(record) {
+          a_records[address] = append(a_records[address], zone_string)
+          //log.Println(fmt.Sprintf("ARECORD: %s",address))
+        }
+
 
         if node.Data.TTL < conf.MinTTL {
           offendingNodes = append(offendingNodes, node)
@@ -186,6 +204,7 @@ func main() {
         statusToSave.Data[zoneData.Data.Zone] = zoneData.Data.Serial
       }
     }
+
 		counter++
 	}
 
@@ -201,21 +220,48 @@ func main() {
 	mustCheck(err)
 	log.Println("done")
 
+
+
+
+	var textSlice []string
 	// decide what to do with results
 	if len(offendingNodes) > 0 {
-		var textSlice []string
 		textSlice = append(textSlice, fmt.Sprintf("Those nodes have TTLs lower than %d", conf.MinTTL))
 		for _, n := range offendingNodes {
 			textSlice = append(textSlice, fmt.Sprintf("%s", n.Data.FQDN))
 		}
-		text := strings.Join(textSlice, "\n")
-
-		switch {
-		case conf.PrintResults == true:
-			printResults(text)
-		case conf.SlackResults == true:
-			err = slackResults(text, conf)
-			check(err)
-		}
 	}
+
+
+
+  if cont.PrintZoneResults == true {
+    textSlice = append(textSlice, fmt.Sprintf("%s", "CNAMES"))
+    for k, zones := range cname_records {
+      textSlice = append(textSlice, fmt.Sprintf("\n%s", k))
+      for _, zone := range(zones) {
+        textSlice = append(textSlice, fmt.Sprintf("\t%s", zone))
+      }
+    }
+
+    textSlice = append(textSlice, fmt.Sprintf("%s", "ARECORDS"))
+    for k, zones := range a_records {
+      textSlice = append(textSlice, fmt.Sprintf("\n%s", k))
+      for _, zone := range(zones) {
+        textSlice = append(textSlice, fmt.Sprintf("\t%s", zone))
+      }
+    }
+  }
+
+  text := strings.Join(textSlice, "\n")
+
+  if conf.PrintResults == true {
+    log.Println("printing results")
+    printResults(text)
+  }
+
+  if conf.SlackResults == true {
+    log.Println("sending to slack")
+    err = slackResults(text, conf)
+    check(err)
+  }
 }
