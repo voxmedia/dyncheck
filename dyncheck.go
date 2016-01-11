@@ -234,7 +234,7 @@ func main() {
 
 
 
-  if cont.PrintZoneResults == true {
+  if conf.PrintZoneResults == true {
     textSlice = append(textSlice, fmt.Sprintf("%s", "CNAMES"))
     for k, zones := range cname_records {
       textSlice = append(textSlice, fmt.Sprintf("\n%s", k))
